@@ -68,7 +68,7 @@ h2{font-size:17px;margin:14px 4px 8px}
 <div id="print"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-const APP_VERSION='0.3.4';
+const APP_VERSION='0.3.5';
 const KEY='pie_obra_v2';
 const UNIDADES=['m','m²','m³','ud','t'];
 const ESTADOS_PARTIDA=['sin empezar','en ejecución','pendiente de pruebas','terminado'];
@@ -129,6 +129,7 @@ function render(){
   document.getElementById('badge').style.display=db.obras.some(o=>o.fake)?'inline':'none';
   const vistas={panel:vPanel,obras:vObras,nuevo:vNuevo,listado:vListado};
   document.getElementById('app').innerHTML=vistas[tab]();
+  if(tab==='nuevo') engancharBorrador();
 }
 
 /* ---------- PANEL ---------- */
@@ -315,8 +316,8 @@ function vNuevo(){
       <label>Días perdidos</label><input id="d_num" type="number" min="0" step="0.5">
       <label>Causa</label><select id="d_causa"><option>lluvia</option><option>falta de permiso</option><option>falta de material</option><option>otra</option></select></div>
     <label>Siguiente acción</label><input id="r_sig">
-    <label>Fotos</label><input id="r_fotos" type="file" accept="image/*" capture="environment" multiple>
-    <div class="mut">Las fotos se cuentan en el registro. Su guardado en Drive está pendiente.</div>
+    <label>Fotos</label><input id="r_fotos" type="file" accept="image/*" multiple onclick="guardarBorrador()" onchange="prepararFotos(this)">
+    <div class="mut" id="fotos_info">Las fotos se reducen de tamaño antes de subirlas a Drive.</div>
     <button class="btn" onclick="guardarReg()">Guardar registro</button></div>`;
 }
 function usarPlantilla(k){prefill={...(prefill||{}),...PLANT[k]};render()}
@@ -346,8 +347,8 @@ function guardarReg(){
   if(!desc){alert('Falta la descripción');return}
   const av=v('r_avance');
   const obraId=v('r_obra');
-  const fotosTmp=[...(document.getElementById('r_fotos')?.files||[])];
-  const r={id:uid(),obraId,fecha:v('r_fecha'),hora:v('r_hora'),tipo,persona:v('r_persona'),tramo:v('r_tramo'),codigo:v('r_codigo'),descripcion:desc,avance:(tipo==='visita'||tipo==='avance')&&av!==''?Math.min(100,Math.max(0,Number(av))):'',siguiente:v('r_sig'),fotos:document.getElementById('r_fotos').files.length,gps:gpsTmp,creado:new Date().toISOString()};
+  const fotosTmp=fotosSel.length?fotosSel.slice():[...(document.getElementById('r_fotos')?.files||[])];
+  const r={id:uid(),obraId,fecha:v('r_fecha'),hora:v('r_hora'),tipo,persona:v('r_persona'),tramo:v('r_tramo'),codigo:v('r_codigo'),descripcion:desc,avance:(tipo==='visita'||tipo==='avance')&&av!==''?Math.min(100,Math.max(0,Number(av))):'',siguiente:v('r_sig'),fotos:fotosTmp.length,gps:gpsTmp,creado:new Date().toISOString()};
   if(tipo==='incidencia'){
     r.incidencia={prioridad:v('i_prio'),responsable:v('i_resp'),limite:v('i_lim'),estado:v('i_est'),historial:[{fecha:hoy(),texto:v('i_est')}]};
   }
@@ -368,7 +369,7 @@ function guardarReg(){
   guardar();
   if(driveOk()){sincronizarRegistro(r,fotosTmp);}
   else if(drive.hojaId){fotosPend[r.id]=fotosTmp;conectarDrive();}
-  prefill=null;prefObra=null;gpsTmp=null;
+  prefill=null;prefObra=null;gpsTmp=null;fotosSel=[];borrarBorrador();
   abrirObra(r.obraId);
 }
 function cambiarEstado(regId,est){
@@ -666,7 +667,28 @@ async function sincronizarPendientes(silencioso){
 }
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+/* ---------- BORRADOR Y FOTOS (evita perder el registro si Android cierra la página al usar la cámara) ---------- */
+const BKEY='pie_obra_borrador';
+const BCAMPOS=['r_obra','r_fecha','r_hora','r_tipo','r_persona','r_tramo','r_codigo','r_desc','r_avance','i_prio','i_resp','i_lim','i_est','m_partida','m_valor','mt_mov','mt_texto','mt_cant','mt_est','d_num','d_causa','r_sig'];
+let fotosSel=[];
+function guardarBorrador(){try{const d={t:Date.now()};BCAMPOS.forEach(id=>{const el=document.getElementById(id);if(el)d[id]=el.value});localStorage.setItem(BKEY,JSON.stringify(d))}catch(e){}}
+function leerBorrador(){try{const d=JSON.parse(localStorage.getItem(BKEY));return d&&Date.now()-d.t<2*3600*1000&&(d.r_desc||d.r_persona||d.m_valor||d.r_sig)?d:null}catch(e){return null}}
+function borrarBorrador(){try{localStorage.removeItem(BKEY)}catch(e){}}
+function aplicarBorrador(d){BCAMPOS.forEach(id=>{const el=document.getElementById(id);if(el&&d[id]!=null&&d[id]!=='')el.value=d[id]});if(d.r_tipo)setBoxes(d.r_tipo)}
+function engancharBorrador(){document.querySelectorAll('#app input:not([type=file]),#app select,#app textarea').forEach(el=>{el.addEventListener('input',guardarBorrador);el.addEventListener('change',guardarBorrador)})}
+function comprimir(file){return new Promise((ok,ko)=>{const url=URL.createObjectURL(file);const img=new Image();img.onload=()=>{const m=1600,k=Math.min(1,m/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);c.toBlob(b=>b?ok(new File([b],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'})):ko(new Error('sin imagen')),'image/jpeg',0.8)};img.onerror=()=>{URL.revokeObjectURL(url);ko(new Error('no se pudo leer'))};img.src=url;})}
+async function prepararFotos(input){
+  const info=document.getElementById('fotos_info');
+  if(info) info.textContent='Preparando fotos...';
+  fotosSel=[];
+  for(const f of input.files){try{fotosSel.push(await comprimir(f))}catch(e){fotosSel.push(f)}}
+  if(info) info.textContent=fotosSel.length?`${fotosSel.length} foto(s) lista(s)`:'';
+}
+
+const borradorIni=leerBorrador();
+if(borradorIni) tab='nuevo';
 render();
+if(borradorIni){aplicarBorrador(borradorIni);toast('Borrador recuperado. Si habías hecho una foto, vuelve a adjuntarla.');}
 </script>
 </body>
 </html>
