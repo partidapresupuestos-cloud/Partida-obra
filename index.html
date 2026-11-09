@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pie de obra</title>
+<style>
+/* Paleta orientativa Elecnor (azul y naranja). Sustituir por los hex oficiales del manual de marca. */
+:root{--bg:#eef3f8;--card:#fff;--ink:#0f2238;--mut:#5b6b7d;--acc:#f28c28;--azul:#0b3d6e;--ok:#1e7b3a;--warn:#c62828;--line:#d6e0ea;--field:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1520;--card:#162331;--ink:#e8eef5;--mut:#9fb0c2;--line:#2a3b4f;--field:#101b27}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:80px}
+header{background:var(--azul);color:#fff;padding:12px 16px;font-weight:600;position:sticky;top:0;z-index:5}
+main{padding:12px;max-width:640px;margin:auto}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:6}
+nav button{flex:1;padding:14px 4px;border:0;background:none;font:inherit;font-size:13px;color:var(--mut)}
+nav button.on{color:var(--ink);font-weight:600;border-top:3px solid var(--acc)}
+.card{background:var(--card);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--line)}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.mut{color:var(--mut);font-size:13px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink)}
+textarea{min-height:80px}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:14px;font:inherit;font-weight:600;width:100%;margin-top:12px;min-height:48px}
+.btn2{background:#e9ecf1;color:var(--ink);border:0;border-radius:8px;padding:10px 12px;font:inherit;min-height:44px}
+.btn3{background:var(--azul);color:#fff;border:0;border-radius:8px;padding:10px 12px;font:inherit;min-height:44px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:#eef1f5;color:#0f2238}
+.tag.incidencia{background:#fdecea;color:var(--warn)}
+.tag.avance{background:#e8f5e9;color:var(--ok)}
+.tag.medicion{background:#e3eefa;color:var(--azul)}
+.tag.acuerdo,.tag.cambio{background:#fff1e0;color:#8a4b00}
+.tag.material{background:#eef6ee;color:#2f5f2f}
+.tag.dias{background:#f1ecfb;color:#4b2d7a}
+.bar{height:8px;background:#e9ecf1;border-radius:99px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--azul)}
+h2{font-size:17px;margin:14px 4px 8px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+.kpi b{font-size:22px;display:block}
+.fic{font-size:11px;background:#fff3cd;color:#1d2330;padding:2px 6px;border-radius:4px;margin-left:6px}
+.med{font-size:13px;margin-top:6px;border-top:1px dashed var(--line);padding-top:6px}
+.warn{color:var(--warn);font-weight:600}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;font-size:13px}
+.cal button{padding:8px 0;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);min-height:40px}
+.cal button.hoy{border-color:var(--acc);font-weight:700}
+#toast{position:fixed;left:12px;right:12px;bottom:70px;background:var(--azul);color:#fff;border-radius:10px;padding:12px;display:none;justify-content:space-between;align-items:center;gap:8px;z-index:9}
+#print{display:none}
+@media print{
+  body *{visibility:hidden}
+  #print,#print *{visibility:visible}
+  #print{display:block;position:absolute;left:0;top:0;width:100%;padding:16px;color:#000;background:#fff}
+  header,nav,#toast{display:none!important}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{border:1px solid #999;padding:4px;vertical-align:top}
+}
+</style>
+</head>
+<body>
+<header>Pie de obra <span id="badge" class="fic" style="display:none">DATOS FICTICIOS</span></header>
+<main id="app"></main>
+<nav id="nav"></nav>
+<div id="toast"></div>
+<div id="print"></div>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const APP_VERSION='0.3.0';
+const KEY='pie_obra_v2';
+const UNIDADES=['m','m²','m³','ud','t'];
+const ESTADOS_PARTIDA=['sin empezar','en ejecución','pendiente de pruebas','terminado'];
+const ESTADOS_INC=['abierta','en curso','resuelta','verificada'];
+const PLANT={
+  visita:{tipo:'visita',descripcion:'Visita de seguimiento. Estado general de la obra: '},
+  zanja:{tipo:'avance',descripcion:'Zanja en el tramo: metros ejecutados, profundidad y afecciones: '},
+  arqueta:{tipo:'avance',descripcion:'Arqueta ejecutada o revisada (código): '},
+  columna:{tipo:'avance',descripcion:'Columna instalada (código): altura, luminaria y conexión: '},
+  cuadro:{tipo:'avance',descripcion:'Cuadro de mando: estado, conexionado y pruebas pendientes: '},
+  canalizacion:{tipo:'avance',descripcion:'Canalización tendida (diámetro y tramo): '},
+  cable:{tipo:'avance',descripcion:'Cable tendido (sección y tramo): '}
+};
+
+let db=cargar();
+let tab='panel';
+let vista={modo:'lista'};
+let prefill=null;
+let prefObra=null;
+let gpsTmp=null;
+let filtros={obra:'',tipo:'',persona:'',desde:'',hasta:'',q:''};
+let calMes=hoy().slice(0,7);
+let undoStack=null, undoTimer=null;
+
+function cargar(){try{const d=JSON.parse(localStorage.getItem(KEY));return d&&d.obras?{obras:d.obras,partidas:d.partidas||[],regs:d.regs||[]}:{obras:[],partidas:[],regs:[]}}catch(e){return{obras:[],partidas:[],regs:[]}}}
+function guardar(){localStorage.setItem(KEY,JSON.stringify(db))}
+function uid(){return Math.random().toString(36).slice(2,9)}
+function addDias(f,n){const d=new Date(f+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function hoy(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)}
+function ahora(){return new Date().toTimeString().slice(0,5)}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function cmpDesc(a,b){return (b.fecha+b.hora+b.creado).localeCompare(a.fecha+a.hora+a.creado)}
+function dias(f){return f?Math.round((new Date(f+'T00:00:00Z')-new Date(hoy()+'T00:00:00Z'))/86400000):null}
+function nombreObra(id){const o=db.obras.find(x=>x.id===id);return o?o.nombre:'(obra eliminada)'}
+function ordenObras(){return [...db.obras].sort((a,b)=>(b.abierta-a.abierta)||a.nombre.localeCompare(b.nombre))}
+function avanceObra(id){const r=db.regs.filter(x=>x.obraId===id&&x.avance!=='' && x.avance!=null).sort(cmpDesc)[0];return r?r.avance:null}
+function retraso(o){return o.abierta&&o.fin&&dias(o.fin)<0}
+function visitaVencida(o){
+  if(!o.abierta||!o.frecuencia) return false;
+  const v=db.regs.filter(r=>r.obraId===o.id&&r.tipo==='visita').sort(cmpDesc)[0];
+  if(!v) return true;
+  return -dias(v.fecha)>o.frecuencia;
+}
+function ritmo(o){
+  const av=avanceObra(o.id);
+  if(av==null||!o.inicio||!o.fin) return null;
+  const transc=-dias(o.inicio), rest=dias(o.fin);
+  if(transc<=0) return null;
+  return {actual:Math.round(av/transc*7*10)/10, necesario: rest>0?Math.round((100-av)/rest*7*10)/10:null};
+}
+function barra(v){return v==null?'<div class="mut">Sin avance registrado</div>':`<div class="mut">Avance ${v} %</div><div class="bar"><i style="width:${Math.min(100,v)}%"></i></div>`}
+function go(t){tab=t;render();window.scrollTo(0,0)}
+function abrirObra(id){vista={modo:'detalle',id};tab='obras';render();window.scrollTo(0,0)}
+
+function render(){
+  const tabs=[['panel','Panel'],['obras','Obras'],['nuevo','Nuevo'],['listado','Listado']];
+  document.getElementById('nav').innerHTML=tabs.map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
+  document.getElementById('badge').style.display=db.obras.some(o=>o.fake)?'inline':'none';
+  const vistas={panel:vPanel,obras:vObras,nuevo:vNuevo,listado:vListado};
+  document.getElementById('app').innerHTML=vistas[tab]();
+}
+
+/* ---------- PANEL ---------- */
+function vPanel(){
+  const ab=db.obras.filter(o=>o.abierta);
+  const sem=db.regs.filter(r=>r.fecha>=addDias(hoy(),-6)).length;
+  const incAb=db.regs.filter(r=>r.tipo==='incidencia'&&r.incidencia&&r.incidencia.estado!=='verificada').length;
+  const vencidas=ab.filter(visitaVencida).length;
+  const sinSig=db.regs.filter(r=>r.fecha>=addDias(hoy(),-30)&&!r.siguiente&&(r.tipo==='visita'||r.tipo==='avance')).length;
+  let h=`<div class="kpis">
+    <div class="kpi"><b>${ab.length}</b><span class="mut">Obras abiertas</span></div>
+    <div class="kpi"><b>${sem}</b><span class="mut">Registros últimos 7 días</span></div>
+    <div class="kpi"><b class="${incAb?'warn':''}">${incAb}</b><span class="mut">Incidencias sin verificar</span></div>
+    <div class="kpi"><b class="${vencidas?'warn':''}">${vencidas}</b><span class="mut">Visitas vencidas</span></div></div>
+    ${sinSig?`<div class="card mut" style="margin-top:8px">${sinSig} registros de los últimos 30 días sin acción siguiente.</div>`:''}`;
+  h+='<h2>Obras abiertas</h2>';
+  if(!ab.length) h+='<div class="card mut">No hay obras abiertas. Márcalas desde Obras.</div>';
+  ab.forEach(o=>{
+    const d=dias(o.fin), rt=ritmo(o);
+    const txtFin=d===null?'':(d>=0?` (faltan ${d} días)`:` (${-d} días pasados)`);
+    h+=`<div class="card" onclick="abrirObra('${o.id}')">
+      <div class="row"><b>${esc(o.nombre)}</b><span>${retraso(o)?'<span class="tag incidencia">Retraso</span> ':''}${visitaVencida(o)?'<span class="tag incidencia">Visita vencida</span>':''}</span></div>
+      <div class="mut">${esc(o.cliente)} · fin previsto ${esc(o.fin)||'—'}${txtFin}</div>
+      ${barra(avanceObra(o.id))}
+      ${rt?`<div class="mut" style="margin-top:6px">Ritmo actual ${rt.actual} %/sem${rt.necesario!==null?` · necesario ${rt.necesario} %/sem`:''}</div>`:''}
+    </div>`;
+  });
+  const pend=pendientes();
+  h+=`<h2>Google Drive</h2><div class="card">
+    <div class="mut">${driveOk()?'Conectado. Registros en la hoja «Registros pie de obra» y fotos en la carpeta «Pie de obra».':'No conectado. Los registros se guardan en este móvil hasta que conectes Drive.'}</div>
+    <button class="btn3" style="width:100%;margin-top:8px" onclick="conectarDrive()">${driveOk()?'Reconectar Drive':'Conectar Drive'}</button>
+    ${pend&&driveOk()?`<button class="btn2" style="width:100%;margin-top:8px" onclick="sincronizarPendientes()">Sincronizar pendientes (${pend})</button>`:(pend?`<div class="mut" style="margin-top:6px">Pendientes de subir a Drive: ${pend}</div>`:'')}
+  </div>`;
+  h+=`<h2>Copia y ajustes</h2><div class="card">
+    <div class="row" style="gap:8px"><button class="btn2" style="flex:1" onclick="exportarCopia()">Exportar copia</button>
+    <label class="btn2" style="flex:1;text-align:center;display:block;color:var(--ink);cursor:pointer;margin:0;padding:10px 12px">Importar copia<input type="file" accept="application/json" style="display:none" onchange="importarCopia(this)"></label></div>
+    <div class="row" style="gap:8px;margin-top:8px"><button class="btn2" style="flex:1" onclick="cargarPrueba()">Cargar datos de prueba</button>
+    <button class="btn2" style="flex:1" onclick="borrarPrueba()">Borrar datos de prueba</button></div>
+    <div class="mut" style="margin-top:10px">Versión ${APP_VERSION} · Los datos se guardan en este dispositivo.</div></div>`;
+  return h;
+}
+
+/* ---------- OBRAS ---------- */
+function vObras(){
+  if(vista.modo==='detalle') return vDetalle(vista.id);
+  if(vista.modo==='nueva'||vista.modo==='editar') return vFormObra();
+  let h=`<button class="btn" onclick="vista={modo:'nueva'};render()">+ Nueva obra</button>`;
+  if(!db.obras.length) h+='<div class="card mut">Todavía no hay obras.</div>';
+  ordenObras().forEach(o=>{
+    h+=`<div class="card" onclick="abrirObra('${o.id}')"><div class="row"><b>${esc(o.nombre)}</b><span class="tag">${o.abierta?'Abierta':'Cerrada'}</span></div>
+      <div class="mut">${esc(o.responsable)} · ${o.puntos||'—'} puntos de luz</div>${barra(avanceObra(o.id))}</div>`;
+  });
+  return h;
+}
+function vFormObra(){
+  const e=vista.modo==='editar'?db.obras.find(x=>x.id===vista.id):{};
+  const campos=[['nombre','Nombre de la obra *','text'],['cliente','Cliente / ayuntamiento','text'],['expediente','Nº de expediente','text'],['subcontrata','Subcontrata','text'],['puntos','Nº de puntos de luz','number'],['ubicacion','Ubicación','text'],['responsable','Responsable','text'],['inicio','Fecha de inicio','date'],['fin','Fecha prevista de fin','date'],['frecuencia','Frecuencia de visita (días, opcional)','number']];
+  let h=`<div class="card"><h2 style="margin-top:0">${vista.modo==='editar'?'Editar obra':'Nueva obra'}</h2>`;
+  campos.forEach(([k,l,t])=>{h+=`<label>${l}</label><input id="f_${k}" type="${t}" value="${esc(e[k]??'')}">`});
+  h+=`<label><input id="f_abierta" type="checkbox" style="width:auto" ${e.abierta!==false?'checked':''}> Obra abierta</label>`;
+  h+=`<button class="btn" onclick="guardarObra()">Guardar obra</button>
+    <button class="btn2" style="width:100%;margin-top:8px" onclick="vista={modo:'lista'};render()">Cancelar</button></div>`;
+  return h;
+}
+function guardarObra(){
+  const g=k=>document.getElementById('f_'+k).value.trim();
+  const nombre=g('nombre');
+  if(!nombre){alert('Falta el nombre de la obra');return}
+  const datos={nombre,cliente:g('cliente'),expediente:g('expediente'),subcontrata:g('subcontrata'),puntos:Number(g('puntos'))||0,ubicacion:g('ubicacion'),responsable:g('responsable'),inicio:g('inicio'),fin:g('fin'),frecuencia:Number(g('frecuencia'))||0,abierta:document.getElementById('f_abierta').checked};
+  if(vista.modo==='editar'){Object.assign(db.obras.find(x=>x.id===vista.id),datos)}
+  else{db.obras.push({id:uid(),...datos})}
+  guardar();vista={modo:'lista'};render();
+}
+function toggleAbierta(id){
+  const o=db.obras.find(x=>x.id===id);
+  if(o.abierta&&!confirm('¿Cerrar esta obra? Dejará de aparecer en el panel de obras abiertas.'))return;
+  o.abierta=!o.abierta;guardar();render();
+}
+function vDetalle(id){
+  const o=db.obras.find(x=>x.id===id);
+  if(!o){vista={modo:'lista'};return vObras()}
+  const regs=db.regs.filter(r=>r.obraId===id).sort(cmpDesc);
+  const diasPerd=regs.filter(r=>r.tipo==='dias').reduce((s,r)=>s+(Number(r.diasPerdidos)||0),0);
+  const rt=ritmo(o);
+  let h=`<div class="card">
+    <div class="row"><b>${esc(o.nombre)}</b><span class="tag">${o.abierta?'Abierta':'Cerrada'}</span></div>
+    <div style="margin-top:6px">${retraso(o)?'<span class="tag incidencia">Retraso</span> ':''}${visitaVencida(o)?'<span class="tag incidencia">Visita vencida</span>':''}</div>
+    <div class="mut" style="margin-top:8px">Cliente: ${esc(o.cliente)||'—'} · Expediente: ${esc(o.expediente)||'—'}<br>
+    Subcontrata: ${esc(o.subcontrata)||'—'} · Puntos de luz: ${o.puntos||'—'}<br>
+    Ubicación: ${esc(o.ubicacion)||'—'} · Responsable: ${esc(o.responsable)||'—'}<br>
+    Inicio: ${esc(o.inicio)||'—'} · Fin previsto: ${esc(o.fin)||'—'} · Visita cada ${o.frecuencia||'—'} días<br>
+    Días perdidos registrados: ${diasPerd}</div>
+    ${barra(avanceObra(id))}
+    ${rt?`<div class="mut" style="margin-top:6px">Ritmo actual ${rt.actual} %/sem${rt.necesario!==null?` · necesario ${rt.necesario} %/sem`:''}</div>`:''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn3" onclick="prefObra='${id}';prefill=null;go('nuevo')">+ Registrar</button>
+      <button class="btn2" onclick="imprimirActa('${id}')">Acta de hoy</button>
+      <button class="btn2" onclick="vista={modo:'editar',id:'${id}'};render()">Editar</button>
+      <button class="btn2" onclick="toggleAbierta('${id}')">${o.abierta?'Cerrar obra':'Abrir obra'}</button>
+      <button class="btn2" onclick="vista={modo:'lista'};render()">Volver</button>
+    </div></div>`;
+  h+=vPartidas(o);
+  h+=`<h2>Registros (${regs.length})</h2>`;
+  if(!regs.length) h+='<div class="card mut">Sin registros todavía.</div>';
+  regs.forEach(r=>{h+=tarjetaReg(r,false)});
+  return h;
+}
+
+/* ---------- PARTIDAS (51, 59, 17) ---------- */
+function acumuladoPartida(p){return db.regs.filter(r=>r.medicion&&r.medicion.partidaId===p.id).reduce((s,r)=>s+(Number(r.medicion.valor)||0),0)}
+function vPartidas(o){
+  const ps=db.partidas.filter(p=>p.obraId===o.id);
+  let h=`<h2>Partidas</h2>`;
+  if(!ps.length) h+='<div class="card mut">Sin partidas. Añade las unidades de obra que quieres controlar.</div>';
+  ps.forEach(p=>{
+    const acc=acumuladoPartida(p);
+    const pct=p.prevista?Math.round(acc/p.prevista*100):null;
+    h+=`<div class="card"><div class="row"><b>${esc(p.nombre)}</b>
+      <button class="btn2" onclick="borrarPartida('${p.id}')">Borrar</button></div>
+      <div class="mut">Acumulado ${acc} ${esc(p.unidad)}${p.prevista?` de ${p.prevista} ${esc(p.unidad)} previstos${pct!==null?` (${pct}%)`:''}`:''}</div>
+      ${pct!==null?`<div class="bar"><i style="width:${Math.min(100,pct)}%"></i></div>`:''}
+      <label>Estado</label><select onchange="estadoPartida('${p.id}',this.value)">${ESTADOS_PARTIDA.map(s=>`<option ${p.estado===s?'selected':''}>${s}</option>`).join('')}</select></div>`;
+  });
+  h+=`<div class="card"><label>Nueva partida</label><input id="p_nombre" placeholder="Ej. Canalización PVC 110 tramo 2">
+    <div class="row" style="gap:8px;margin-top:6px"><select id="p_unidad" style="flex:1">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select>
+    <input id="p_prev" type="number" step="any" placeholder="Prevista" style="flex:1"></div>
+    <button class="btn3" style="width:100%;margin-top:8px" onclick="addPartida('${o.id}')">Añadir partida</button></div>`;
+  return h;
+}
+function addPartida(oid){
+  const n=document.getElementById('p_nombre').value.trim();
+  if(!n){alert('Falta el nombre de la partida');return}
+  db.partidas.push({id:uid(),obraId:oid,nombre:n,unidad:document.getElementById('p_unidad').value,prevista:Number(document.getElementById('p_prev').value)||0,estado:'sin empezar'});
+  guardar();render();
+}
+function estadoPartida(id,v){const p=db.partidas.find(x=>x.id===id);p.estado=v;guardar();render()}
+function borrarPartida(id){
+  if(!confirm('¿Borrar esta partida? Los registros de medición se conservan.'))return;
+  db.partidas=db.partidas.filter(p=>p.id!==id);guardar();render();
+}
+
+/* ---------- REGISTROS ---------- */
+const PLANT_TIPOS=['visita','avance','incidencia','medicion','acuerdo','cambio','material','dias'];
+function vNuevo(){
+  if(!db.obras.length) return '<div class="card mut">Crea primero una obra en la pestaña Obras.</div>';
+  const p=prefill||{};
+  const orden=ordenObras();
+  const sel=p.obraId||(prefObra&&db.obras.some(o=>o.id===prefObra)?prefObra:orden[0].id);
+  const personas=[...new Set(db.regs.map(r=>r.persona).filter(Boolean))];
+  const tramos=[...new Set(db.regs.map(r=>r.tramo).filter(Boolean))];
+  const tipo=p.tipo||'visita';
+  const box=k=>`display:${tipo===k?'block':'none'}`;
+  const partidas=db.partidas.map(pt=>`<option value="${pt.id}">${esc(nombreObra(pt.obraId))} · ${esc(pt.nombre)} (${esc(pt.unidad)})</option>`).join('');
+  return `<div class="card"><h2 style="margin-top:0">Nuevo registro</h2>
+    <label>Plantilla rápida</label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${Object.keys(PLANT).map(k=>`<button class="btn2" onclick="usarPlantilla('${k}')">${k}</button>`).join('')}</div>
+    <label>Obra</label><select id="r_obra">${orden.map(o=>`<option value="${o.id}" ${o.id===sel?'selected':''}>${esc(o.nombre)}</option>`).join('')}</select>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Fecha</label><input id="r_fecha" type="date" value="${p.fecha||hoy()}"></div>
+    <div style="flex:1"><label>Hora</label><input id="r_hora" type="time" value="${p.hora||ahora()}"></div></div>
+    <label>Tipo</label><select id="r_tipo" onchange="setBoxes(this.value)">${PLANT_TIPOS.map(t=>`<option value="${t}" ${t===tipo?'selected':''}>${t}</option>`).join('')}</select>
+    <label>Persona que visita o informa</label><input id="r_persona" list="dl_personas" value="${esc(p.persona||'')}">
+    <datalist id="dl_personas">${personas.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <label>Tramo o zona</label><input id="r_tramo" list="dl_tramos" value="${esc(p.tramo||'')}">
+    <datalist id="dl_tramos">${tramos.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <label>Punto o código (ej. C-12, CM-03)</label><input id="r_codigo" value="${esc(p.codigo||'')}">
+    <label>Descripción *</label><textarea id="r_desc">${esc(p.descripcion||'')}</textarea>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn2" onclick="dictar()">Dictar</button><button class="btn2" onclick="capturarGps()">Capturar GPS</button></div>
+    <div class="mut" id="gps_txt" style="margin-top:4px">${gpsTmp?`GPS: ${gpsTmp.lat}, ${gpsTmp.lon}`:''}</div>
+    <label>Avance % (vacío si no aplica)</label><input id="r_avance" type="number" min="0" max="100">
+    <div id="box_inc" style="${box('incidencia')};border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px">
+      <label>Prioridad</label><select id="i_prio"><option>baja</option><option selected>media</option><option>alta</option></select>
+      <label>Responsable</label><input id="i_resp">
+      <label>Fecha límite</label><input id="i_lim" type="date">
+      <label>Estado</label><select id="i_est">${ESTADOS_INC.map(s=>`<option>${s}</option>`).join('')}</select></div>
+    <div id="box_med" style="${box('medicion')};border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px">
+      <label>Partida</label><select id="m_partida">${partidas||'<option value="">Crea primero una partida en la obra</option>'}</select>
+      <label>Cantidad medida</label><input id="m_valor" type="number" step="any"></div>
+    <div id="box_mat" style="${box('material')};border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px">
+      <label>Movimiento</label><select id="mt_mov"><option>entrada</option><option>salida</option></select>
+      <label>Material</label><input id="mt_texto" placeholder="Ej. Luminarias LED 60 W">
+      <label>Cantidad</label><input id="mt_cant" type="number" step="any">
+      <label>Estado</label><select id="mt_est"><option>pendiente de recibir</option><option>recibido</option></select></div>
+    <div id="box_dias" style="${box('dias')};border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px">
+      <label>Días perdidos</label><input id="d_num" type="number" min="0" step="0.5">
+      <label>Causa</label><select id="d_causa"><option>lluvia</option><option>falta de permiso</option><option>falta de material</option><option>otra</option></select></div>
+    <label>Siguiente acción</label><input id="r_sig">
+    <label>Fotos</label><input id="r_fotos" type="file" accept="image/*" capture="environment" multiple>
+    <div class="mut">Las fotos se cuentan en el registro. Su guardado en Drive está pendiente.</div>
+    <button class="btn" onclick="guardarReg()">Guardar registro</button></div>`;
+}
+function usarPlantilla(k){prefill={...(prefill||{}),...PLANT[k]};render()}
+function setBoxes(v){
+  const m={incidencia:'box_inc',medicion:'box_med',material:'box_mat',dias:'box_dias'};
+  Object.values(m).forEach(id=>document.getElementById(id).style.display='none');
+  if(m[v]) document.getElementById(m[v]).style.display='block';
+}
+function dictar(){
+  const R=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!R){alert('El dictado no está disponible en este navegador');return}
+  const rec=new R(); rec.lang='es-ES';
+  rec.onresult=e=>{const ta=document.getElementById('r_desc');const t=e.results[0][0].transcript;ta.value=(ta.value?ta.value+' ':'')+t};
+  rec.start();
+}
+function capturarGps(){
+  if(!navigator.geolocation){alert('Este dispositivo no tiene GPS');return}
+  navigator.geolocation.getCurrentPosition(
+    p=>{gpsTmp={lat:p.coords.latitude.toFixed(5),lon:p.coords.longitude.toFixed(5)};document.getElementById('gps_txt').textContent=`GPS: ${gpsTmp.lat}, ${gpsTmp.lon}`},
+    ()=>alert('No se pudo obtener la ubicación'));
+}
+function guardarReg(){
+  const v=id=>{const el=document.getElementById(id);return el?el.value.trim():''};
+  const desc=v('r_desc');
+  const tipo=v('r_tipo');
+  if(!v('r_fecha')){alert('Falta la fecha');return}
+  if(!desc){alert('Falta la descripción');return}
+  const av=v('r_avance');
+  const obraId=v('r_obra');
+  const fotosTmp=[...(document.getElementById('r_fotos')?.files||[])];
+  const r={id:uid(),obraId,fecha:v('r_fecha'),hora:v('r_hora'),tipo,persona:v('r_persona'),tramo:v('r_tramo'),codigo:v('r_codigo'),descripcion:desc,avance:(tipo==='visita'||tipo==='avance')&&av!==''?Math.min(100,Math.max(0,Number(av))):'',siguiente:v('r_sig'),fotos:document.getElementById('r_fotos').files.length,gps:gpsTmp,creado:new Date().toISOString()};
+  if(tipo==='incidencia'){
+    r.incidencia={prioridad:v('i_prio'),responsable:v('i_resp'),limite:v('i_lim'),estado:v('i_est'),historial:[{fecha:hoy(),texto:v('i_est')}]};
+  }
+  if(tipo==='medicion'){
+    const pt=db.partidas.find(x=>x.id===v('m_partida'));
+    if(!pt){alert('Crea primero una partida en la obra');return}
+    if(v('m_valor')===''){alert('Falta la cantidad medida');return}
+    r.medicion={partidaId:pt.id,valor:Number(v('m_valor')),unidad:pt.unidad,punto:v('r_codigo')||v('r_tramo')};
+    r.obraId=pt.obraId;
+  }
+  if(tipo==='material'){
+    r.material={mov:v('mt_mov'),texto:v('mt_texto'),cantidad:v('mt_cant'),estado:v('mt_est')};
+  }
+  if(tipo==='dias'){
+    r.diasPerdidos=Number(v('d_num'))||0;r.causa=v('d_causa');
+  }
+  db.regs.push(r);
+  guardar();
+  sincronizarRegistro(r,fotosTmp);
+  prefill=null;prefObra=null;gpsTmp=null;
+  abrirObra(r.obraId);
+}
+function cambiarEstado(regId,est){
+  const r=db.regs.find(x=>x.id===regId);
+  r.incidencia.estado=est;
+  r.incidencia.historial.push({fecha:hoy(),texto:est});
+  guardar();render();
+}
+function duplicar(regId){
+  const r=db.regs.find(x=>x.id===regId);
+  prefObra=r.obraId;
+  prefill={obraId:r.obraId,tipo:r.tipo,persona:r.persona,tramo:r.tramo,codigo:r.codigo,descripcion:r.descripcion,siguiente:r.siguiente,fecha:hoy(),hora:ahora()};
+  tab='nuevo';render();window.scrollTo(0,0);
+}
+function borrarReg(id){
+  const r=db.regs.find(x=>x.id===id);
+  db.regs=db.regs.filter(x=>x.id!==id);
+  undoStack={tipo:'reg',data:r};
+  guardar();render();
+  toast('Registro borrado',true);
+}
+function deshacer(){
+  if(!undoStack)return;
+  if(undoStack.tipo==='reg') db.regs.push(undoStack.data);
+  undoStack=null;guardar();
+  document.getElementById('toast').style.display='none';
+  render();
+}
+function toast(msg,conUndo){
+  const t=document.getElementById('toast');
+  t.innerHTML=`<span>${esc(msg)}</span>${conUndo?'<button class="btn2" onclick="deshacer()">Deshacer</button>':''}`;
+  t.style.display='flex';
+  clearTimeout(undoTimer);
+  undoTimer=setTimeout(()=>{t.style.display='none';undoStack=null},6000);
+}
+function tarjetaReg(r,mostrarObra){
+  const pt=r.medicion?db.partidas.find(p=>p.id===r.medicion.partidaId):null;
+  let extra='';
+  if(r.tipo==='incidencia'&&r.incidencia){
+    extra=`<div class="med"><b>Prioridad ${esc(r.incidencia.prioridad)}</b> · Responsable: ${esc(r.incidencia.responsable)||'—'} · Límite: ${esc(r.incidencia.limite)||'—'}
+      <select onchange="cambiarEstado('${r.id}',this.value)" style="margin-top:6px">${ESTADOS_INC.map(s=>`<option ${r.incidencia.estado===s?'selected':''}>${s}</option>`).join('')}</select>
+      <div class="mut">Historial: ${r.incidencia.historial.map(h=>esc(h.fecha)+' '+esc(h.texto)).join(' → ')}</div></div>`;
+  }
+  if(r.medicion) extra=`<div class="med"><b>${r.medicion.valor} ${esc(r.medicion.unidad)}</b> · ${pt?esc(pt.nombre):'(partida eliminada)'} ${r.medicion.punto?'· '+esc(r.medicion.punto):''}</div>`;
+  if(r.material) extra=`<div class="med">${esc(r.material.mov)}: ${esc(r.material.texto)} ${esc(r.material.cantidad)} · ${esc(r.material.estado)}</div>`;
+  if(r.tipo==='dias') extra=`<div class="med">Días perdidos: <b>${r.diasPerdidos}</b> · Causa: ${esc(r.causa)}</div>`;
+  return `<div class="card">
+    <div class="row"><span class="tag ${esc(r.tipo)}">${esc(r.tipo)}</span><span class="mut">${esc(r.fecha)} ${esc(r.hora)}</span></div>
+    ${mostrarObra?`<div class="mut">${esc(nombreObra(r.obraId))}</div>`:''}
+    ${r.tramo||r.codigo?`<div class="mut">${esc(r.tramo)} ${r.codigo?'· '+esc(r.codigo):''}</div>`:''}
+    <div style="margin-top:6px">${esc(r.descripcion)}</div>
+    ${r.persona?`<div class="mut">Persona: ${esc(r.persona)}</div>`:''}
+    ${r.avance!==''&&r.avance!=null?`<div class="mut">Avance: ${r.avance} %</div>`:''}
+    ${r.siguiente?`<div class="mut">Siguiente: ${esc(r.siguiente)}</div>`:''}
+    ${r.fotos?`<div class="mut">Fotos: ${r.fotos} (pendiente de Drive)</div>`:''}
+    ${r.gps?`<div class="mut">GPS: ${r.gps.lat}, ${r.gps.lon}</div>`:''}
+    ${extra}
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px"><button class="btn2" onclick="duplicar('${r.id}')">Duplicar</button><button class="btn2" onclick="borrarReg('${r.id}')">Borrar</button></div></div>`;
+}
+
+/* ---------- LISTADO, CALENDARIO, PDF, CSV ---------- */
+function filtrados(){
+  const q=filtros.q.toLowerCase();
+  return db.regs.filter(r=>(!filtros.obra||r.obraId===filtros.obra)&&(!filtros.tipo||r.tipo===filtros.tipo)&&(!filtros.persona||r.persona===filtros.persona)&&(!filtros.desde||r.fecha>=filtros.desde)&&(!filtros.hasta||r.fecha<=filtros.hasta)&&(!q||[r.descripcion,r.persona,r.siguiente,r.tramo,r.codigo].join(' ').toLowerCase().includes(q))).sort(cmpDesc);
+}
+function vListado(){
+  const obrasOpts='<option value="">Todas</option>'+db.obras.map(o=>`<option value="${o.id}" ${filtros.obra===o.id?'selected':''}>${esc(o.nombre)}</option>`).join('');
+  const tipos=['',...PLANT_TIPOS].map(t=>`<option value="${t}" ${filtros.tipo===t?'selected':''}>${t||'Todos'}</option>`).join('');
+  const personas=[...new Set(db.regs.map(r=>r.persona).filter(Boolean))];
+  const persOpts='<option value="">Todas</option>'+personas.map(p=>`<option ${filtros.persona===p?'selected':''}>${esc(p)}</option>`).join('');
+  const rs=filtrados();
+  let h=`<div class="card">
+    <label>Buscar texto</label><input value="${esc(filtros.q)}" onchange="filtros.q=this.value;render()" placeholder="Descripción, persona, tramo...">
+    <label>Obra</label><select onchange="filtros.obra=this.value;render()">${obrasOpts}</select>
+    <label>Tipo</label><select onchange="filtros.tipo=this.value;render()">${tipos}</select>
+    <label>Persona</label><select onchange="filtros.persona=this.value;render()">${persOpts}</select>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Desde</label><input type="date" value="${filtros.desde}" onchange="filtros.desde=this.value;render()"></div>
+    <div style="flex:1"><label>Hasta</label><input type="date" value="${filtros.hasta}" onchange="filtros.hasta=this.value;render()"></div></div>
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn2" style="flex:1" onclick="exportarRegs()">CSV registros</button><button class="btn2" style="flex:1" onclick="exportarObras()">CSV obras</button><button class="btn2" style="flex:1" onclick="imprimirLista()">PDF</button></div></div>`;
+  h+=vCalendario();
+  h+=`<h2>${rs.length} registros</h2>`;
+  rs.forEach(r=>{h+=tarjetaReg(r,true)});
+  return h;
+}
+function vCalendario(){
+  const [y,m]=calMes.split('-').map(Number);
+  const primerDia=new Date(Date.UTC(y,m-1,1)).getUTCDay();
+  const offset=(primerDia+6)%7;
+  const nDias=new Date(Date.UTC(y,m,0)).getUTCDate();
+  const cuenta={};
+  db.regs.forEach(r=>{if(r.fecha&&r.fecha.startsWith(calMes))cuenta[r.fecha]=(cuenta[r.fecha]||0)+1});
+  let cells='';
+  for(let i=0;i<offset;i++) cells+='<div></div>';
+  for(let d=1;d<=nDias;d++){
+    const f=`${calMes}-${String(d).padStart(2,'0')}`;
+    cells+=`<button class="${f===hoy()?'hoy':''}" onclick="filtros.desde='${f}';filtros.hasta='${f}';render()">${d}${cuenta[f]?`<br><span class="mut">${cuenta[f]}</span>`:''}</button>`;
+  }
+  return `<div class="card"><div class="row"><button class="btn2" onclick="mesAnterior()">‹</button><b>${calMes}</b><button class="btn2" onclick="mesSiguiente()">›</button></div>
+    <div class="cal" style="margin-top:8px">${['L','M','X','J','V','S','D'].map(x=>`<div class="mut">${x}</div>`).join('')}${cells}</div>
+    <div class="row" style="margin-top:8px"><span class="mut">Pulsa un día para filtrar.</span><button class="btn2" onclick="filtros.desde='';filtros.hasta='';render()">Quitar fechas</button></div></div>`;
+}
+function mesAnterior(){const d=new Date(calMes+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()-1);calMes=d.toISOString().slice(0,7);render()}
+function mesSiguiente(){const d=new Date(calMes+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()+1);calMes=d.toISOString().slice(0,7);render()}
+
+function imprimirHtml(h){document.getElementById('print').innerHTML=h;window.print()}
+function imprimirLista(){
+  const rs=filtrados();
+  imprimirHtml(`<h1>Registros de obra</h1><p>Generado ${hoy()} · ${rs.length} registros</p><table><tr><th>Fecha</th><th>Obra</th><th>Tipo</th><th>Persona</th><th>Descripción</th><th>Siguiente</th></tr>${rs.map(r=>`<tr><td>${esc(r.fecha)} ${esc(r.hora)}</td><td>${esc(nombreObra(r.obraId))}</td><td>${esc(r.tipo)}</td><td>${esc(r.persona)}</td><td>${esc(r.descripcion)}</td><td>${esc(r.siguiente)}</td></tr>`).join('')}</table>`);
+}
+function imprimirActa(oid){
+  const o=db.obras.find(x=>x.id===oid);
+  const rs=db.regs.filter(r=>r.obraId===oid&&r.fecha===hoy()).sort(cmpDesc);
+  imprimirHtml(`<h1>Acta de visita · ${esc(o.nombre)}</h1><p>Fecha: ${hoy()} · Responsable: ${esc(o.responsable)} · Expediente: ${esc(o.expediente)}</p><table><tr><th>Hora</th><th>Tipo</th><th>Persona</th><th>Descripción</th><th>Siguiente</th></tr>${rs.map(r=>`<tr><td>${esc(r.hora)}</td><td>${esc(r.tipo)}</td><td>${esc(r.persona)}</td><td>${esc(r.descripcion)}</td><td>${esc(r.siguiente)}</td></tr>`).join('')||'<tr><td colspan="5">Sin registros hoy</td></tr>'}</table>`);
+}
+
+function descargarTexto(nombre,txt,tipo){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([txt],{type:tipo}));
+  a.download=nombre;document.body.appendChild(a);a.click();a.remove();
+}
+function csv(cab,filas){
+  const cel=v=>`"${String(v??'').replace(/"/g,'""')}"`;
+  return '﻿'+[cab,...filas].map(f=>f.map(cel).join(';')).join('\r\n');
+}
+function exportarRegs(){
+  const cab=['fecha','hora','obra','tipo','persona','tramo','codigo','descripcion','avance_%','siguiente','fotos','partida','cantidad','unidad','estado_incidencia','dias_perdidos','causa','gps'];
+  const filas=filtrados().map(r=>[r.fecha,r.hora,nombreObra(r.obraId),r.tipo,r.persona,r.tramo,r.codigo,r.descripcion,r.avance,r.siguiente,r.fotos,
+    r.medicion?(db.partidas.find(p=>p.id===r.medicion.partidaId)||{}).nombre:'',r.medicion?r.medicion.valor:'',r.medicion?r.medicion.unidad:'',
+    r.incidencia?r.incidencia.estado:'',r.diasPerdidos??'',r.causa||'',r.gps?r.gps.lat+','+r.gps.lon:'']);
+  descargarTexto('registros.csv',csv(cab,filas),'text/csv;charset=utf-8');
+}
+function exportarObras(){
+  const cab=['nombre','cliente','expediente','subcontrata','puntos_luz','ubicacion','responsable','inicio','fin','frecuencia_visita','abierta','avance_%'];
+  const filas=db.obras.map(o=>[o.nombre,o.cliente,o.expediente,o.subcontrata,o.puntos,o.ubicacion,o.responsable,o.inicio,o.fin,o.frecuencia,o.abierta?'si':'no',avanceObra(o.id)??'']);
+  descargarTexto('obras.csv',csv(cab,filas),'text/csv;charset=utf-8');
+}
+
+/* ---------- COPIA DE SEGURIDAD (93) ---------- */
+function exportarCopia(){descargarTexto(`copia-pie-obra-${hoy()}.json`,JSON.stringify(db,null,2),'application/json')}
+function importarCopia(input){
+  const f=input.files[0];if(!f)return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    try{
+      const d=JSON.parse(fr.result);
+      if(!Array.isArray(d.obras)||!Array.isArray(d.regs)) throw new Error('formato');
+      if(!confirm('Esto reemplaza los datos actuales de este dispositivo. ¿Continuar?'))return;
+      db={obras:d.obras,partidas:d.partidas||[],regs:d.regs};
+      guardar();render();
+    }catch(e){alert('El archivo no es una copia válida')}
+  };
+  fr.readAsText(f);
+}
+
+/* ---------- DATOS DE PRUEBA ---------- */
+function cargarPrueba(){
+  if(db.obras.some(o=>o.fake)){alert('Los datos de prueba ya están cargados');return}
+  const o1=uid(),o2=uid(),o3=uid();
+  db.obras.push(
+    {id:o1,fake:true,nombre:'Obra ficticia A · Calle Ejemplo',cliente:'Ayuntamiento ficticio A',expediente:'EXP-FICT-001',subcontrata:'Subcontrata ficticia X',puntos:120,ubicacion:'Localidad ficticia A',responsable:'Persona ficticia 1',inicio:addDias(hoy(),-60),fin:addDias(hoy(),30),frecuencia:7,abierta:true},
+    {id:o2,fake:true,nombre:'Obra ficticia B · Avenida Prueba',cliente:'Ayuntamiento ficticio B',expediente:'EXP-FICT-002',subcontrata:'Subcontrata ficticia Y',puntos:64,ubicacion:'Localidad ficticia B',responsable:'Persona ficticia 2',inicio:addDias(hoy(),-80),fin:addDias(hoy(),-5),frecuencia:5,abierta:true},
+    {id:o3,fake:true,nombre:'Obra ficticia C · Polígono Demo',cliente:'Cliente ficticio C',expediente:'EXP-FICT-003',subcontrata:'',puntos:40,ubicacion:'Localidad ficticia C',responsable:'Persona ficticia 3',inicio:addDias(hoy(),-120),fin:addDias(hoy(),-90),frecuencia:0,abierta:false}
+  );
+  const pz=uid(),pc=uid();
+  db.partidas.push(
+    {id:pz,obraId:o1,nombre:'Zanja tramo 2',unidad:'m',prevista:200,estado:'en ejecución'},
+    {id:pc,obraId:o1,nombre:'Canalización PVC 110',unidad:'m',prevista:180,estado:'en ejecución'}
+  );
+  const R=(obraId,d,hora,tipo,persona,tramo,codigo,descripcion,extra)=>db.regs.push({id:uid(),obraId,fecha:addDias(hoy(),d),hora,tipo,persona,tramo,codigo,descripcion,avance:'',siguiente:'',fotos:0,gps:null,creado:new Date().toISOString(),...extra});
+  R(o1,-10,'09:30','visita','Persona ficticia 1','Tramo 1','', 'Revisión de avance en zona norte (ficticio).',{avance:35,siguiente:'Pedir cable 4x16'});
+  R(o1,-6,'10:15','medicion','Persona ficticia 1','Tramo 2','CM-03','Zanja abierta (ficticio).',{medicion:{partidaId:pz,valor:60,unidad:'m',punto:'CM-03'}});
+  R(o1,-3,'11:00','avance','Persona ficticia 1','Tramo 2','','Tendido de canalización en tramo 2. Pendiente cierre de arquetas.',{avance:52,siguiente:'Coordinar cierre con subcontrata'});
+  R(o1,-2,'08:00','medicion','Persona ficticia 2','Tramo 2','','Canalización PVC 110 tendida (ficticio).',{medicion:{partidaId:pc,valor:90,unidad:'m',punto:'Tramo 2'}});
+  R(o1,-1,'08:45','incidencia','Persona ficticia 2','Tramo 3','','Rotura de canalización por terceros en tramo 3 (ficticio).',{incidencia:{prioridad:'alta',responsable:'Persona ficticia 2',limite:addDias(hoy(),3),estado:'abierta',historial:[{fecha:addDias(hoy(),-1),texto:'abierta'}]},siguiente:'Avisar a cliente y reparar'});
+  R(o1,-4,'14:00','dias','Persona ficticia 1','','','Día perdido por lluvia (ficticio).',{diasPerdidos:1,causa:'lluvia'});
+  R(o2,-4,'10:00','visita','Persona ficticia 2','','','Comprobación de pruebas de aislamiento en cuadro (ficticio).',{avance:80,siguiente:'Emitir acta de pruebas'});
+  R(o2,-2,'12:15','incidencia','Persona ficticia 2','','CUA-01','Falta de suministro provisional (ficticio).',{incidencia:{prioridad:'media',responsable:'Persona ficticia 2',limite:'',estado:'en curso',historial:[{fecha:addDias(hoy(),-2),texto:'abierta'},{fecha:addDias(hoy(),-1),texto:'en curso'}]},siguiente:'Gestionar con cliente'});
+  R(o2,-1,'09:00','material','Persona ficticia 2','','','Pedido de luminarias (ficticio).',{material:{mov:'entrada',texto:'Luminarias LED 60 W',cantidad:20,estado:'pendiente de recibir'}});
+  R(o3,-95,'09:00','visita','Persona ficticia 3','','','Visita de cierre (ficticio).',{avance:100,siguiente:'Archivar documentación'});
+  guardar();render();
+}
+function borrarPrueba(){
+  if(!confirm('¿Borrar solo los datos de prueba?'))return;
+  const ids=db.obras.filter(o=>o.fake).map(o=>o.id);
+  db.obras=db.obras.filter(o=>!o.fake);
+  db.partidas=db.partidas.filter(p=>!ids.includes(p.obraId));
+  db.regs=db.regs.filter(r=>!ids.includes(r.obraId));
+  guardar();render();
+}
+
+/* ---------- GOOGLE DRIVE Y SHEETS ---------- */
+const CLIENT_ID='504130294628-vl7u6ul66v2083dbn4eo61e3ngg8ctd1.apps.googleusercontent.com';
+const SCOPES='https://www.googleapis.com/auth/drive.file';
+const CAB_HOJA=['fecha','hora','obra','tipo','persona','tramo','codigo','descripcion','avance_%','siguiente','fotos','partida','cantidad','unidad','estado_incidencia','dias_perdidos','causa','gps'];
+let gClient=null, gToken=null, gTokenExp=0;
+let drive=(()=>{try{return JSON.parse(localStorage.getItem('pie_obra_drive')||'{}')}catch(e){return{}}})();
+function guardarDrive(){localStorage.setItem('pie_obra_drive',JSON.stringify(drive))}
+function driveOk(){return !!gToken&&Date.now()<gTokenExp}
+function pendientes(){return db.regs.filter(r=>!r.sincronizado&&!((db.obras.find(o=>o.id===r.obraId)||{}).fake)).length}
+function conectarDrive(){
+  if(!window.google||!google.accounts){alert('No se ha cargado Google. Revisa la conexión y que la app esté abierta desde GitHub Pages.');return}
+  gClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:async resp=>{
+    if(resp.error){alert('Google no concedió el acceso: '+resp.error);return}
+    gToken=resp.access_token;gTokenExp=Date.now()+(Number(resp.expires_in)-60)*1000;
+    try{await prepararDrive();toast('Drive conectado');}
+    catch(e){alert('No se pudo preparar Drive: '+e.message)}
+    render();
+  }});
+  gClient.requestAccessToken({prompt:''});
+}
+async function gfetch(url,opts={}){
+  if(!driveOk()) throw new Error('sesión de Drive caducada, pulsa Conectar Drive');
+  const r=await fetch(url,{...opts,headers:{Authorization:'Bearer '+gToken,...(opts.headers||{})}});
+  if(!r.ok) throw new Error(r.status+' '+(await r.text()).slice(0,120));
+  return r.json();
+}
+async function crearCarpeta(nombre,padre){
+  const body={name:nombre,mimeType:'application/vnd.google-apps.folder',...(padre?{parents:[padre]}:{})};
+  const f=await gfetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return f.id;
+}
+async function prepararDrive(){
+  if(!drive.carpetaRaiz) drive.carpetaRaiz=await crearCarpeta('Pie de obra');
+  if(!drive.hojaId){
+    const s=await gfetch('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({properties:{title:'Registros pie de obra'}})});
+    drive.hojaId=s.spreadsheetId;
+    await gfetch(`https://sheets.googleapis.com/v4/spreadsheets/${drive.hojaId}/values/A1:append?valueInputOption=USER_ENTERED`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[CAB_HOJA]})});
+  }
+  guardarDrive();
+}
+async function carpetaObra(o){
+  drive.carpetas=drive.carpetas||{};
+  if(!drive.carpetas[o.id]){drive.carpetas[o.id]=await crearCarpeta(o.nombre.slice(0,80),drive.carpetaRaiz);guardarDrive();}
+  return drive.carpetas[o.id];
+}
+async function subirFoto(file,carpetaId,nombre){
+  const form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify({name:nombre,parents:[carpetaId]})],{type:'application/json'}));
+  form.append('file',file);
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer '+gToken},body:form});
+  if(!r.ok) throw new Error('foto '+r.status);
+}
+function filaHoja(r){
+  const o=db.obras.find(x=>x.id===r.obraId);
+  const pt=r.medicion?db.partidas.find(p=>p.id===r.medicion.partidaId):null;
+  return [r.fecha,r.hora,o?o.nombre:'',r.tipo,r.persona||'',r.tramo||'',r.codigo||'',r.descripcion||'',r.avance??'',r.siguiente||'',r.fotos||0,pt?pt.nombre:'',r.medicion?r.medicion.valor:'',r.medicion?r.medicion.unidad:'',r.incidencia?r.incidencia.estado:'',r.diasPerdidos??'',r.causa||'',r.gps?r.gps.lat+','+r.gps.lon:''];
+}
+async function sincronizarRegistro(r,fotos){
+  if(!driveOk()){return}
+  try{
+    if(!drive.hojaId) await prepararDrive();
+    await gfetch(`https://sheets.googleapis.com/v4/spreadsheets/${drive.hojaId}/values/A1:append?valueInputOption=USER_ENTERED`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[filaHoja(r)]})});
+    const o=db.obras.find(x=>x.id===r.obraId);
+    if(fotos&&fotos.length&&o){
+      const c=await carpetaObra(o);
+      for(const f of fotos) await subirFoto(f,c,`${r.fecha}_${r.hora.replace(':','')}_${f.name}`);
+    }
+    r.sincronizado=true;guardar();
+    toast('Registro guardado en Drive');
+  }catch(e){
+    toast('Guardado en el móvil. Drive: '+e.message);
+  }
+  render();
+}
+async function sincronizarPendientes(){
+  if(!driveOk()){alert('Conecta Drive primero');return}
+  const lista=db.regs.filter(r=>!r.sincronizado&&!((db.obras.find(o=>o.id===r.obraId)||{}).fake)).sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
+  try{
+    if(!drive.hojaId) await prepararDrive();
+    for(const r of lista){
+      await gfetch(`https://sheets.googleapis.com/v4/spreadsheets/${drive.hojaId}/values/A1:append?valueInputOption=USER_ENTERED`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[filaHoja(r)]})});
+      r.sincronizado=true;
+    }
+    guardar();
+    toast(`${lista.length} registros subidos a Drive`);
+  }catch(e){
+    guardar();
+    alert('Error al sincronizar: '+e.message+'. Los pendientes siguen en el móvil.');
+  }
+  render();
+}
+
+render();
+</script>
+</body>
+</html>
