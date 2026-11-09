@@ -11,8 +11,8 @@
 <title>Pie de obra</title>
 <style>
 /* Paleta orientativa Elecnor (azul y naranja). Sustituir por los hex oficiales del manual de marca. */
-:root{--bg:#eef3f8;--card:#fff;--ink:#0f2238;--mut:#5b6b7d;--acc:#f28c28;--azul:#0b3d6e;--ok:#1e7b3a;--warn:#c62828;--line:#d6e0ea;--field:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#0d1520;--card:#162331;--ink:#e8eef5;--mut:#9fb0c2;--line:#2a3b4f;--field:#101b27}}
+:root{--bg:#eef3f8;--card:#fff;--ink:#0f2238;--mut:#5b6b7d;--acc:#f28c28;--azul:#0b3d6e;--ok:#1e7b3a;--warn:#c62828;--line:#d6e0ea;--field:#fff;--btn2:#e9ecf1;--track:#e9ecf1}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1520;--card:#162331;--ink:#e8eef5;--mut:#9fb0c2;--line:#2a3b4f;--field:#101b27;--btn2:#26384d;--track:#26384d}}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:80px}
 header{background:var(--azul);color:#fff;padding:12px 16px;font-weight:600;position:sticky;top:0;z-index:5}
@@ -27,7 +27,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
 input,select,textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink)}
 textarea{min-height:80px}
 .btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:14px;font:inherit;font-weight:600;width:100%;margin-top:12px;min-height:48px}
-.btn2{background:#e9ecf1;color:var(--ink);border:0;border-radius:8px;padding:10px 12px;font:inherit;min-height:44px}
+.btn2{background:var(--btn2);color:var(--ink);border:0;border-radius:8px;padding:10px 12px;font:inherit;min-height:44px}
 .btn3{background:var(--azul);color:#fff;border:0;border-radius:8px;padding:10px 12px;font:inherit;min-height:44px}
 .tag{font-size:12px;padding:2px 8px;border-radius:99px;background:#eef1f5;color:#0f2238}
 .tag.incidencia{background:#fdecea;color:var(--warn)}
@@ -36,7 +36,7 @@ textarea{min-height:80px}
 .tag.acuerdo,.tag.cambio{background:#fff1e0;color:#8a4b00}
 .tag.material{background:#eef6ee;color:#2f5f2f}
 .tag.dias{background:#f1ecfb;color:#4b2d7a}
-.bar{height:8px;background:#e9ecf1;border-radius:99px;overflow:hidden;margin-top:6px}
+.bar{height:8px;background:var(--track);border-radius:99px;overflow:hidden;margin-top:6px}
 .bar i{display:block;height:100%;background:var(--azul)}
 h2{font-size:17px;margin:14px 4px 8px}
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -68,7 +68,7 @@ h2{font-size:17px;margin:14px 4px 8px}
 <div id="print"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-const APP_VERSION='0.3.2';
+const APP_VERSION='0.3.3';
 const KEY='pie_obra_v2';
 const UNIDADES=['m','m²','m³','ud','t'];
 const ESTADOS_PARTIDA=['sin empezar','en ejecución','pendiente de pruebas','terminado'];
@@ -366,7 +366,8 @@ function guardarReg(){
   }
   db.regs.push(r);
   guardar();
-  sincronizarRegistro(r,fotosTmp);
+  if(driveOk()){sincronizarRegistro(r,fotosTmp);}
+  else if(drive.hojaId){fotosPend[r.id]=fotosTmp;conectarDrive();}
   prefill=null;prefObra=null;gpsTmp=null;
   abrirObra(r.obraId);
 }
@@ -563,6 +564,7 @@ const CLIENT_ID='504130294628-vl7u6ul66v2083dbn4eo61e3ngg8ctd1.apps.googleuserco
 const SCOPES='https://www.googleapis.com/auth/drive.file';
 const CAB_HOJA=['fecha','hora','obra','tipo','persona','tramo','codigo','descripcion','avance_%','siguiente','fotos','partida','cantidad','unidad','estado_incidencia','dias_perdidos','causa','gps'];
 let gClient=null, gToken=null, gTokenExp=0;
+const fotosPend={};
 let drive=(()=>{try{return JSON.parse(localStorage.getItem('pie_obra_drive')||'{}')}catch(e){return{}}})();
 function guardarDrive(){localStorage.setItem('pie_obra_drive',JSON.stringify(drive))}
 function driveOk(){return !!gToken&&Date.now()<gTokenExp}
@@ -573,7 +575,7 @@ function conectarDrive(){
     if(resp.error){alert('Google no concedió el acceso: '+resp.error+(resp.error_description?' ('+resp.error_description+')':''));return}
     if(!google.accounts.oauth2.hasGrantedAllScopes(resp,SCOPES)){alert('No se concedió el permiso de Google Drive. Vuelve a pulsar Conectar Drive y marca la casilla de Drive en la pantalla de Google.');return}
     gToken=resp.access_token;gTokenExp=Date.now()+(Number(resp.expires_in)-60)*1000;
-    try{await prepararDrive();toast('Drive conectado');}
+    try{await prepararDrive();if(pendientes()){await sincronizarPendientes(true);}else{toast('Drive conectado');}}
     catch(e){alert('No se pudo preparar Drive: '+e.message)}
     render();
   },
@@ -638,17 +640,20 @@ async function sincronizarRegistro(r,fotos){
   }
   render();
 }
-async function sincronizarPendientes(){
-  if(!driveOk()){alert('Conecta Drive primero');return}
+async function sincronizarPendientes(silencioso){
+  if(!driveOk()){if(!silencioso)alert('Conecta Drive primero');return}
   const lista=db.regs.filter(r=>!r.sincronizado&&!((db.obras.find(o=>o.id===r.obraId)||{}).fake)).sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
   try{
     if(!drive.hojaId) await prepararDrive();
     for(const r of lista){
       await gfetch(`https://sheets.googleapis.com/v4/spreadsheets/${drive.hojaId}/values/A1:append?valueInputOption=USER_ENTERED`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[filaHoja(r)]})});
+      const fs=fotosPend[r.id];
+      const o=db.obras.find(x=>x.id===r.obraId);
+      if(fs&&fs.length&&o){const c=await carpetaObra(o);for(const f of fs) await subirFoto(f,c,`${r.fecha}_${r.hora.replace(':','')}_${f.name}`);delete fotosPend[r.id];}
       r.sincronizado=true;
     }
     guardar();
-    toast(`${lista.length} registros subidos a Drive`);
+    toast(`Drive conectado · ${lista.length} registros subidos`);
   }catch(e){
     guardar();
     alert('Error al sincronizar: '+e.message+'. Los pendientes siguen en el móvil.');
