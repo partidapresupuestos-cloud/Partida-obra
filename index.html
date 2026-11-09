@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b3d6e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>Pie de obra</title>
 <style>
 /* Paleta orientativa Elecnor (azul y naranja). Sustituir por los hex oficiales del manual de marca. */
@@ -64,7 +68,7 @@ h2{font-size:17px;margin:14px 4px 8px}
 <div id="print"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-const APP_VERSION='0.3.0';
+const APP_VERSION='0.3.1';
 const KEY='pie_obra_v2';
 const UNIDADES=['m','m²','m³','ud','t'];
 const ESTADOS_PARTIDA=['sin empezar','en ejecución','pendiente de pruebas','terminado'];
@@ -646,6 +650,7 @@ async function sincronizarPendientes(){
   render();
 }
 
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 render();
 </script>
 </body>
