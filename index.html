@@ -68,7 +68,7 @@ h2{font-size:17px;margin:14px 4px 8px}
 <div id="print"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-const APP_VERSION='0.3.1';
+const APP_VERSION='0.3.2';
 const KEY='pie_obra_v2';
 const UNIDADES=['m','m²','m³','ud','t'];
 const ESTADOS_PARTIDA=['sin empezar','en ejecución','pendiente de pruebas','terminado'];
@@ -570,13 +570,19 @@ function pendientes(){return db.regs.filter(r=>!r.sincronizado&&!((db.obras.find
 function conectarDrive(){
   if(!window.google||!google.accounts){alert('No se ha cargado Google. Revisa la conexión y que la app esté abierta desde GitHub Pages.');return}
   gClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:async resp=>{
-    if(resp.error){alert('Google no concedió el acceso: '+resp.error);return}
+    if(resp.error){alert('Google no concedió el acceso: '+resp.error+(resp.error_description?' ('+resp.error_description+')':''));return}
+    if(!google.accounts.oauth2.hasGrantedAllScopes(resp,SCOPES)){alert('No se concedió el permiso de Google Drive. Vuelve a pulsar Conectar Drive y marca la casilla de Drive en la pantalla de Google.');return}
     gToken=resp.access_token;gTokenExp=Date.now()+(Number(resp.expires_in)-60)*1000;
     try{await prepararDrive();toast('Drive conectado');}
     catch(e){alert('No se pudo preparar Drive: '+e.message)}
     render();
+  },
+  error_callback:err=>{
+    const tipo=(err&&err.type)||'desconocido';
+    const pwa=window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches;
+    alert('La ventana de Google se cerró sin conectar ('+tipo+').'+(pwa?' Estás usando la app instalada: prueba a abrirla en Chrome normal para conectar Drive la primera vez.':' Revisa que Chrome no bloquee las ventanas emergentes de esta web.'));
   }});
-  gClient.requestAccessToken({prompt:''});
+  gClient.requestAccessToken({prompt:drive.hojaId?'':'consent'});
 }
 async function gfetch(url,opts={}){
   if(!driveOk()) throw new Error('sesión de Drive caducada, pulsa Conectar Drive');
